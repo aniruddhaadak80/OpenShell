@@ -320,3 +320,172 @@ async fn sandbox_is_listed(
             .ok_or_else(|| "sandbox list page counter overflowed".to_string())?;
     }
 }
+
+#[cfg(all(test, unix))]
+mod tests {
+    use std::collections::VecDeque;
+    use std::os::unix::process::ExitStatusExt;
+    use std::process::{ExitStatus, Output};
+    use std::sync::{Arc, Mutex};
+
+    use crate::executor::{CliExecution, CliExecutionError, CliExecutor};
+
+    use super::*;
+
+    struct MockCli {
+        state: Mutex<MockCliState>,
+    }
+
+    struct MockCliState {
+        responses: VecDeque<MockResponse>,
+        invocations: Vec<Vec<String>>,
+    }
+
+    enum MockResponse {
+        Output {
+            exit_code: i32,
+            stdout: String,
+            stderr: String,
+        },
+        Timeout,
+    }
+
+    impl MockResponse {
+        fn output(exit_code: i32, stdout: &str, stderr: &str) -> Self {
+            Self::Output {
+                exit_code,
+                stdout: stdout.to_string(),
+                stderr: stderr.to_string(),
+            }
+        }
+
+        fn success(stdout: &str) -> Self {
+            Self::output(0, stdout, "")
+        }
+    }
+
+    impl MockCli {
+        fn new(responses: Vec<MockResponse>) -> Self {
+            Self {
+                state: Mutex::new(MockCliState {
+                    responses: responses.into(),
+                    invocations: Vec::new(),
+                }),
+            }
+        }
+
+        fn invocations(&self) -> Vec<Vec<String>> {
+            self.state
+                .lock()
+                .expect("lock mock CLI state")
+                .invocations
+                .clone()
+        }
+    }
+
+    impl CliExecutor for MockCli {
+        fn execute(
+            &self,
+            args: Vec<String>,
+            _environment: Vec<(String, String)>,
+            _command_timeout: Duration,
+        ) -> CliExecution<'_> {
+            let response = {
+                let mut state = self.state.lock().expect("lock mock CLI state");
+                state.invocations.push(args);
+                state
+                    .responses
+                    .pop_front()
+                    .expect("mock CLI received an unexpected invocation")
+            };
+
+            Box::pin(async move {
+                match response {
+                    MockResponse::Output {
+                        exit_code,
+                        stdout,
+                        stderr,
+                    } => Ok(Output {
+                        status: ExitStatus::from_raw(exit_code << 8),
+                        stdout: stdout.into_bytes(),
+                        stderr: stderr.into_bytes(),
+                    }),
+                    MockResponse::Timeout => Err(CliExecutionError::Timeout),
+                }
+            })
+        }
+    }
+
+    fn test_runner(responses: Vec<MockResponse>) -> (OpenShellRunner, Arc<MockCli>) {
+        let cli = Arc::new(MockCli::new(responses));
+        let runner = OpenShellRunner::with_executor(cli.clone(), "sandbox-lifecycle");
+        (runner, cli)
+    }
+
+    #[tokio::test]
+    async fn successful_exhausted_list_confirms_absence() {
+        let (runner, _cli) = test_runner(vec![MockResponse::success(
+            r#"{"sandboxes":[],"next_page_token":""}"#,
+        )]);
+
+        assert!(
+            !sandbox_is_listed(&runner, "deleted", "deleted")
+                .await
+                .expect("successful exhausted list should confirm absence")
+        );
+        runner.finish(Ok(())).await.expect("finish test runner");
+    }
+
+    #[tokio::test]
+    async fn searches_every_list_page_before_confirming_presence() {
+        let (runner, cli) = test_runner(vec![
+            MockResponse::success(r#"{"sandboxes":[],"next_page_token":"next"}"#),
+            MockResponse::success(
+                r#"{"sandboxes":[{"name":"target","phase":"Stopped"}],"next_page_token":""}"#,
+            ),
+        ]);
+
+        assert!(
+            sandbox_is_listed(&runner, "target", "deleted")
+                .await
+                .expect("later list page should be searched")
+        );
+        assert_eq!(cli.invocations()[1][5], "next");
+        runner.finish(Ok(())).await.expect("finish test runner");
+    }
+
+    #[tokio::test]
+    async fn command_failure_does_not_confirm_absence() {
+        let (runner, _cli) =
+            test_runner(vec![MockResponse::output(1, "", "authentication expired")]);
+
+        let error = sandbox_is_listed(&runner, "target", "deleted")
+            .await
+            .expect_err("failed list command must not confirm absence");
+        assert!(error.contains("exit 1"));
+        assert!(error.contains("authentication expired"));
+        runner.finish(Ok(())).await.expect("finish test runner");
+    }
+
+    #[tokio::test]
+    async fn transport_failure_does_not_confirm_absence() {
+        let (runner, _cli) = test_runner(vec![MockResponse::Timeout]);
+
+        let error = sandbox_is_listed(&runner, "target", "deleted")
+            .await
+            .expect_err("timed out list command must not confirm absence");
+        assert!(error.contains("timed out"));
+        runner.finish(Ok(())).await.expect("finish test runner");
+    }
+
+    #[tokio::test]
+    async fn invalid_json_does_not_confirm_absence() {
+        let (runner, _cli) = test_runner(vec![MockResponse::success("not json")]);
+
+        let error = sandbox_is_listed(&runner, "target", "deleted")
+            .await
+            .expect_err("invalid list output must not confirm absence");
+        assert!(error.contains("returned invalid JSON"));
+        runner.finish(Ok(())).await.expect("finish test runner");
+    }
+}
