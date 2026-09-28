@@ -269,10 +269,13 @@ and retain that provenance with the local entry; mutable tags are used only
 for explicit publication.
 
 CLI conformance runs after target provisioning and operates only through the
-configured OpenShell CLI. The smoke scenario verifies the black-box sandbox
-lifecycle by creating, inspecting, executing in, and deleting a sandbox. The
-file-transfer scenario verifies portable upload and download behavior, Git-aware
-filtering, and sandbox workspace path safety.
+configured OpenShell CLI. The archive suite defines the installed-artifact test
+boundary, while `openshell-conformance` provides reusable scenarios and a
+standalone compatibility runner. Smoke coverage separates control-plane
+create/get/list/delete behavior from exec behavior so a runtime can run the
+portable subset matching its advertised capabilities. The file-transfer
+scenario verifies portable upload and download behavior, Git-aware filtering,
+and sandbox workspace path safety.
 Feature suites use the same disposable guest but may provision isolated
 dependencies after installation. The Keycloak provider-refresh suite starts a
 guest-local Keycloak realm and verifies a successful OAuth refresh followed by
