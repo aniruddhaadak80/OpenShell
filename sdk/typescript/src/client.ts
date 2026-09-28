@@ -22,6 +22,7 @@ import type { Sandbox, SandboxWorkloadTemplate, UpdateConfigResponse } from './g
 import {
   type ExecSandboxInputSchema,
   OpenShell,
+  ServiceAuthorizationMode as ProtoServiceAuthorizationMode,
   SandboxPhase,
   type SandboxSpecSchema,
   type SandboxWorkloadTemplateSchema,
@@ -162,6 +163,23 @@ export interface ServiceExposure {
   service?: string;
   /** Loopback TCP port inside the sandbox. */
   targetPort: number;
+  /** Handling for an incoming application Authorization header. */
+  authorizationMode?: ServiceAuthorizationMode;
+}
+
+export enum ServiceAuthorizationMode {
+  Strip = 'strip',
+  BearerPassthrough = 'bearer_passthrough',
+}
+
+function serviceAuthorizationModeToProto(mode: ServiceAuthorizationMode | undefined): ProtoServiceAuthorizationMode {
+  switch (mode) {
+    case ServiceAuthorizationMode.BearerPassthrough:
+      return ProtoServiceAuthorizationMode.BEARER_PASSTHROUGH;
+    case ServiceAuthorizationMode.Strip:
+    case undefined:
+      return ProtoServiceAuthorizationMode.STRIP;
+  }
 }
 
 export interface SandboxFromTemplateSpec {
@@ -997,6 +1015,7 @@ export class SandboxClient {
           spec.serviceExposures?.map((exposure) => ({
             service: exposure.service ?? '',
             targetPort: exposure.targetPort,
+            authorizationMode: serviceAuthorizationModeToProto(exposure.authorizationMode),
           })) ?? [],
       });
       return sandboxRef(resp.sandbox, resp.serviceUrls);
@@ -1023,6 +1042,7 @@ export class SandboxClient {
           spec.serviceExposures?.map((exposure) => ({
             service: exposure.service ?? '',
             targetPort: exposure.targetPort,
+            authorizationMode: serviceAuthorizationModeToProto(exposure.authorizationMode),
           })) ?? [],
       });
       return sandboxRef(resp.sandbox, resp.serviceUrls);

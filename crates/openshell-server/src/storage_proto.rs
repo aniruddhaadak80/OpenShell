@@ -119,18 +119,20 @@ mod tests {
     const STORAGE_V1_SCHEMA_SHA256: &str =
         "d68401809d8cea445c35233ef32412bbd041cb2ac5acaf368a0d0bf74d2ddf17";
     // Carries this branch's exec request IDs together with main's opaque watch
-    // cursor and well-known time types. These unreleased public-only fields add
-    // no messages or enums and touch no stored type, so the durable and overlap
-    // fingerprints below remain unchanged.
+    // cursor and well-known time types, plus service authorization behavior in
+    // public requests and the durable ServiceEndpoint. The prior endpoint
+    // fixture below verifies that omission retains secure strip behavior.
     const PUBLIC_RPC_SCHEMA_SHA256: &str =
-        "8fb59b0932ec2f227fdec2d46b6204925e79595695810a247bef731ddd632594";
+        "22f07cdb0f0612f49e1639ad36edaab0df6e27895fb0ae8fa796d933fefef7fa";
     const DURABLE_SCHEMA_SHA256: &str =
-        "9eeaa29dfba187bff69fb7bc4f9a13a0f1d7be3f7049a38c8f0e20ce77ec7d8b";
+        "b94ba425b46625a3f98497f3bb2008a500fafdceeb6c3bd0384a2d34cd44b03c";
     const PUBLIC_DURABLE_OVERLAP_SHA256: &str =
-        "a6e97fdde30c439ffaa03c2952a43033f8ea338fed6b1456ebe2d7d8af14e834";
+        "16e449266f72184b8c8e2d5718d8c04bf6577f8c2166430427e3c0f9d6aff8be";
     // A persisted Sandbox without endpoint status retains its lifecycle fields;
     // the absent repeated field decodes empty and needs no database rewrite.
     const SANDBOX_WITHOUT_ENDPOINT_STATUS: &str = "0a1e0a0a73616e64626f782d6964120773616e64626f783a0764656661756c741a2b0a0773616e64626f782a0d0a05526561647912045472756530023807420d73757065727669736f722d6964";
+    // ServiceEndpoint encoded before authorization_mode field 7 existed.
+    const SERVICE_ENDPOINT_WITHOUT_AUTHORIZATION_MODE: &str = "0a260a0b656e64706f696e742d6964120c73616e64626f782d2d77656228073a0764656661756c74120a73616e64626f782d69641a0773616e64626f78220377656228903f3001";
     // Synthetic payloads generated with the public declarations at v0.0.116,
     // before their relocation into openshell.storage.v1. Values are deliberately
     // non-secret and the ordinary protobuf bytes contain no package names.
@@ -590,14 +592,38 @@ mod tests {
                 overlap_hash.as_str(),
             ),
             (
-                (304, 25),
-                (92, 19),
-                (80, 19),
+                (304, 26),
+                (92, 20),
+                (80, 20),
                 PUBLIC_RPC_SCHEMA_SHA256,
                 DURABLE_SCHEMA_SHA256,
                 PUBLIC_DURABLE_OVERLAP_SHA256
             ),
             "the public/durable schema inventory changed; review API and storage ownership, preserve prior-payload decoding, and update the reviewed fingerprints"
+        );
+    }
+
+    #[test]
+    fn service_endpoint_without_authorization_mode_decodes_as_strip() {
+        use openshell_core::proto::{ServiceAuthorizationMode, ServiceEndpoint};
+
+        let endpoint = ServiceEndpoint::decode(
+            legacy_bytes(SERVICE_ENDPOINT_WITHOUT_AUTHORIZATION_MODE).as_slice(),
+        )
+        .expect("stored service endpoint without authorization mode must decode");
+
+        assert_eq!(endpoint.sandbox_id, "sandbox-id");
+        assert_eq!(endpoint.sandbox, "sandbox");
+        assert_eq!(endpoint.name, "web");
+        assert_eq!(endpoint.target_port, 8080);
+        assert!(endpoint.domain);
+        assert_eq!(
+            endpoint.authorization_mode(),
+            ServiceAuthorizationMode::Unspecified
+        );
+        assert_eq!(
+            crate::service_routing::effective_authorization_mode(endpoint.authorization_mode),
+            ServiceAuthorizationMode::Strip
         );
     }
 

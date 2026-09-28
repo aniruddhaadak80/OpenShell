@@ -54,6 +54,6 @@ pub use types::{
     LogLine, PlatformEvent, SandboxPhase, SandboxRef, SandboxResources, SandboxServiceLevel,
     SandboxSpec, SandboxStartup, SandboxTemplateCreateSpec, SandboxTemplateListOptions,
     SandboxWorkloadConfig, SandboxWorkloadTemplate, SandboxWorkloadTemplateProvenance,
-    SandboxWorkloadTemplateSpec, ServiceExposure, ServiceStatus, WatchEvent, WatchOptions,
-    WorkspaceRef,
+    SandboxWorkloadTemplateSpec, ServiceAuthorizationMode, ServiceExposure, ServiceStatus,
+    WatchEvent, WatchOptions, WorkspaceRef,
 };

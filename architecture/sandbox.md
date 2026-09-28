@@ -733,7 +733,13 @@ sandbox workload directly. The relay supports:
   unnamed endpoint. Routing starts only while the sandbox is ready. `sandbox
   create --expose PORT` uses the unnamed create-time endpoint and keeps the
   sandbox. The standalone service API can add, update, or remove endpoints
-  later.
+  later. Service routing strips `Authorization` unless the matched persisted
+  endpoint explicitly selects bearer passthrough. Passthrough permits at most
+  one syntactically valid Bearer value and forwards it unchanged to the
+  loopback application; gateway and edge identity headers remain stripped.
+  Legacy and unspecified endpoint modes resolve to stripping. Service traffic
+  bypasses control-plane authentication but continues to share the gateway
+  listener and TLS configuration.
 
 Sandbox logs are emitted locally and can also be pushed back to the gateway.
 Security-relevant sandbox behavior uses OCSF structured events; internal

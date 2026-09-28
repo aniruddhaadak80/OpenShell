@@ -580,9 +580,13 @@ Allow and deny append requests carry `L7RuleTarget` to declare the rule, endpoin
 creation and are represented in the Rust, Python, TypeScript, and Go SDK create
 options. The request-only exposure description is not durable; the gateway
 persists the resulting `ServiceEndpoint` objects through the existing endpoint
-store after it persists the sandbox. `SandboxResponse.service_urls` returns the
-routed URLs keyed by service name for `CreateSandbox`; the empty key represents
-the unnamed endpoint, and other sandbox operations leave the map empty.
+store after it persists the sandbox. Each endpoint stores its effective
+application authorization mode. Endpoints encoded before that field existed
+decode as unspecified, which the routing boundary treats as strip. Unknown
+persisted enum values also fail closed to strip. `SandboxResponse.service_urls`
+returns the routed URLs keyed by service name for `CreateSandbox`; the empty key
+represents the unnamed endpoint, and other sandbox operations leave the map
+empty.
 
 The removed `NetworkBinary.harness` field remains reserved by number and name,
 so protobuf implementations cannot reuse its wire slot or source identifier.
