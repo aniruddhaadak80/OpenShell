@@ -20,19 +20,29 @@ const (
 // ProviderProfile defines a provider type template with credentials schema,
 // endpoints, binaries, and discovery configuration.
 type ProviderProfile struct {
-	ID               string
-	DisplayName      string
-	Description      string
-	Category         ProfileCategory
-	Credentials      []ProfileCredential
-	Endpoints        []NetworkEndpoint
-	Binaries         []NetworkBinary
-	InferenceCapable bool
-	Discovery        ProfileDiscovery
-	ResourceVersion  uint64
-	Annotations      map[string]string
-	Source           string
-	Scope            string
+	ID                      string
+	DisplayName             string
+	Description             string
+	Category                ProfileCategory
+	Credentials             []ProfileCredential
+	Endpoints               []NetworkEndpoint
+	Binaries                []NetworkBinary
+	InferenceCapable        bool
+	Discovery               ProfileDiscovery
+	ResourceVersion         uint64
+	Annotations             map[string]string
+	Source                  string
+	Scope                   string
+	Environment             *ProfileEnvironment
+	RequiredPlatformAdapter string
+}
+
+// ProfileEnvironment declares non-secret workload environment defaults.
+type ProfileEnvironment struct {
+	// Config maps destination environment keys to provider config keys.
+	Config map[string]string
+	// Fixed maps destination environment keys to literal values.
+	Fixed map[string]string
 }
 
 // ProfileCredential defines a single credential required by a provider profile.
@@ -139,7 +149,8 @@ type NetworkBinary struct {
 
 // ProfileDiscovery holds local discovery configuration for a profile.
 type ProfileDiscovery struct {
-	Credentials []string
+	Credentials   []string
+	ConfigEnvVars []string
 }
 
 // ProfileImportItem is an item submitted for profile import or lint validation.

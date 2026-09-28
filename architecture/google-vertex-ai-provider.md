@@ -11,7 +11,7 @@ sandbox attachment owns which workload receives access.
 |---|---|
 | CLI | Discovers ADC or accepts service-account bootstrap material and creates the provider record. |
 | Gateway | Stores refresh material through the credential driver and rotates short-lived access tokens. |
-| Provider profile | Declares Vertex hosts, credential aliases, refresh constraints, and permitted binaries. |
+| Provider profile | Declares Vertex hosts, credential aliases, refresh constraints, permitted binaries, environment defaults, and discovery config keys. |
 | Sandbox supervisor | Delivers opaque credential placeholders and resolves them only for profile-authorized Vertex requests. |
 | Workload | Selects the native Vertex endpoint, model, request format, streaming mode, and timeout. |
 
@@ -26,8 +26,8 @@ flows converge on a rotating access token stored in the provider record.
 
 ### Service account
 
-The operator creates the provider with service-account bootstrap material and
-configures `google-service-account-jwt` refresh. The private key remains in the
+The operator creates a provider for runtime credentials and configures
+`google-service-account-jwt` refresh with the service account material. The private key remains in the
 gateway credential store. The gateway mints
 `GOOGLE_VERTEX_AI_SERVICE_ACCOUNT_TOKEN` and refreshes it before expiry.
 
@@ -52,8 +52,25 @@ sandbox.
 6. Token refresh updates the resolver; the workload continues using the same
    placeholder.
 
-The raw `GOOGLE_SERVICE_ACCOUNT_KEY` credential is bootstrap-only and is never
-part of sandbox runtime material.
+The profile does not declare `GOOGLE_SERVICE_ACCOUNT_KEY`. New imports reject
+that legacy credential key in credentials or non-secret environment defaults,
+and existing stored profiles cannot inject it. Removing the declaration from a
+stored profile does not withhold the remaining token and SDK configuration when
+an older provider record still holds the key.
+Private key material enters the gateway through refresh configuration and is
+never a workload credential.
+
+The profile's `environment.config` projects project and region values, and
+`environment.fixed` supplies the Goose default. `discovery.config_env_vars`
+lists the local configuration keys eligible for discovery. The gateway
+classifies the projected values as non-secret, and the supervisor resolves only
+those classified keys before process launch. Sandbox template and spec values
+take precedence over non-secret profile defaults in both main and exec
+processes; credential placeholders retain their provider binding. Renaming the
+imported profile preserves these effects. Lint rejects credential/config
+collisions; attachment accepts identical non-secret defaults from multiple
+providers and rejects conflicting values, credential collisions, and
+unavailable declared platform adapters.
 
 ## Endpoint Boundary
 

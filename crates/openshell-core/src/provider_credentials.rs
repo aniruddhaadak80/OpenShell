@@ -410,24 +410,9 @@ impl ProviderCredentialState {
         inner.current = Arc::new(env);
     }
 
-    /// Return `child_env` with GCP static config vars resolved to real values.
-    ///
-    /// The credential pipeline placeholderizes ALL env values, but GCP SDKs
-    /// and coding agents read certain vars (project ID, region, metadata host)
-    /// at process startup before any HTTP request flows through the proxy.
-    /// This method overrides those vars with resolved real values while
-    /// keeping secret credentials (like `GCP_ACCESS_TOKEN`) as placeholders.
-    ///
-    /// Three layers of env var injection:
-    /// 1. **Synthetic vars** (`GCE_METADATA_IP`, `METADATA_SERVER_DETECTION`)
-    ///    — sandbox-internal config not from user
-    ///    input, inserted directly here with real values.
-    /// 2. **`google_cloud::STATIC_CONFIG_KEYS`** — user-provided non-secret config
-    ///    (project ID, region, SA email) that was placeholderized by
-    ///    `ProviderPlugin::inject_env` → `SecretResolver`; un-placeholderized
-    ///    here so SDKs can read them at startup.
-    /// 3. Everything else stays as placeholders for proxy-time resolution.
-    pub fn child_env_with_gcp_resolved(&self) -> HashMap<String, String> {
+    /// Resolve only environment keys explicitly classified as non-secret by
+    /// the gateway. Credentials remain placeholders for proxy-time resolution.
+    pub fn child_env_with_non_secret_resolved(&self) -> HashMap<String, String> {
         let inner = self
             .inner
             .read()
@@ -442,7 +427,7 @@ impl ProviderCredentialState {
     /// revision must describe the exact environment sent across the boundary,
     /// so callers must not obtain the two values through separate lock
     /// acquisitions.
-    pub fn child_env_snapshot_with_gcp_resolved(
+    pub fn child_env_snapshot_with_non_secret_resolved(
         &self,
     ) -> std::io::Result<(u64, HashMap<String, String>)> {
         let inner = self
@@ -469,53 +454,13 @@ impl ProviderCredentialState {
     fn resolve_child_env_snapshot(
         inner: &ProviderCredentialStateInner,
     ) -> (u64, HashMap<String, String>) {
-        use crate::google_cloud;
-
         let mut env = inner.current.child_env.clone();
-
-        let has_gcp_metadata = env.contains_key("GCE_METADATA_HOST")
-            && inner
-                .non_secret_environment_keys
-                .contains("GCE_METADATA_HOST");
-        let has_gcp_config = google_cloud::STATIC_CONFIG_KEYS
-            .iter()
-            .any(|key| env.contains_key(*key) && inner.non_secret_environment_keys.contains(*key));
-
-        if !has_gcp_metadata && !has_gcp_config {
-            return (inner.current.revision, env);
-        }
-
-        if has_gcp_metadata {
-            // Synthetic vars: sandbox-internal config that doesn't originate
-            // from user input and was never placeholderized.
-            env.insert(
-                "GCE_METADATA_HOST".to_string(),
-                google_cloud::METADATA_LOOPBACK_ADDR.to_string(),
-            );
-            // Python's google-auth builds its ping URL as http://{GCE_METADATA_IP}
-            // so the value must include the port.
-            env.insert(
-                "GCE_METADATA_IP".to_string(),
-                google_cloud::METADATA_LOOPBACK_ADDR.to_string(),
-            );
-            // Node.js gcp-metadata uses METADATA_SERVER_DETECTION to skip the
-            // runtime ping that otherwise fails in sandboxed environments.
-            env.insert(
-                "METADATA_SERVER_DETECTION".to_string(),
-                "assume-present".to_string(),
-            );
-        }
-
-        // Un-placeholderize non-secret config vars so SDKs can read them
-        // at process startup before any HTTP flows through the proxy.
-        if let Some(ref resolver) = inner.combined_resolver {
-            for key in google_cloud::STATIC_CONFIG_KEYS
-                .iter()
-                .filter(|key| inner.non_secret_environment_keys.contains(**key))
-            {
-                let placeholder = crate::secrets::placeholder_for_env_key(key);
-                if let Some(value) = resolver.resolve_placeholder(&placeholder) {
-                    env.insert(key.to_string(), value.to_string());
+        if let Some(resolver) = &inner.current_resolver {
+            for key in &inner.non_secret_environment_keys {
+                if let Some(placeholder) = env.get(key)
+                    && let Some(value) = resolver.resolve_placeholder(placeholder)
+                {
+                    env.insert(key.clone(), value.to_string());
                 }
             }
         }
@@ -564,45 +509,6 @@ impl ProviderCredentialState {
         inner.known_static_credential_keys.clear();
         inner.static_credential_identity_epochs.clear();
         Ok(revision)
-    }
-
-    /// Return the GCP token placeholder and its remaining lifetime in seconds.
-    ///
-    /// Searches `google_cloud::TOKEN_ENV_KEYS` in priority order (SA before
-    /// ADC) atomically to avoid inconsistency during credential
-    /// refresh. Returns `None` if no GCP token is configured or all are
-    /// expired. The `expires_in` defaults to 3600 when expiry is unknown.
-    pub fn gcp_token_response(&self) -> Option<(String, i64)> {
-        const DEFAULT_EXPIRES_IN: i64 = 3600;
-        let inner = self
-            .inner
-            .read()
-            .expect("provider credential state poisoned");
-        let resolver = inner.current_resolver.as_ref()?;
-        for key in crate::google_cloud::TOKEN_ENV_KEYS {
-            let Some(placeholder) = inner.current.child_env.get(*key).cloned() else {
-                continue;
-            };
-            if resolver.resolve_placeholder(&placeholder).is_none() {
-                continue;
-            }
-            let expires_in = resolver.expires_at_ms_for_placeholder(&placeholder).map_or(
-                DEFAULT_EXPIRES_IN,
-                |expires_at_ms| {
-                    if expires_at_ms <= 0 {
-                        DEFAULT_EXPIRES_IN
-                    } else {
-                        let now = crate::time::now_ms();
-                        expires_at_ms.saturating_sub(now) / 1000
-                    }
-                },
-            );
-            if expires_in <= 0 {
-                continue;
-            }
-            return Some((placeholder, expires_in));
-        }
-        None
     }
 
     pub fn install_environment(
@@ -1016,7 +922,6 @@ fn merge_resolvers(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::google_cloud;
 
     #[test]
     fn body_classification_distinguishes_literal_foreign_bound_and_revoked() {
@@ -2121,14 +2026,14 @@ mod tests {
     }
 
     #[test]
-    fn child_env_with_gcp_resolved_without_gcp_returns_unchanged() {
+    fn child_env_with_non_secret_resolved_without_classified_keys_returns_unchanged() {
         let state = ProviderCredentialState::from_environment(
             1,
             HashMap::from([("GITHUB_TOKEN".to_string(), "ghp_abc".to_string())]),
             HashMap::new(),
             HashMap::new(),
         );
-        let env = state.child_env_with_gcp_resolved();
+        let env = state.child_env_with_non_secret_resolved();
         assert_eq!(
             env.get("GITHUB_TOKEN").map(String::as_str),
             Some("openshell:resolve:env:v1_GITHUB_TOKEN"),
@@ -2139,17 +2044,17 @@ mod tests {
     }
 
     #[test]
-    fn child_env_with_gcp_resolved_overrides_gcp_static_vars() {
+    fn child_env_with_non_secret_resolved_resolves_declared_custom_config() {
         let state = ProviderCredentialState::from_bound_environment(
             1,
             HashMap::from([
-                ("GCE_METADATA_HOST".to_string(), "marker".to_string()),
+                ("CUSTOM_ENDPOINT".to_string(), "marker".to_string()),
                 (
                     "GCP_ADC_ACCESS_TOKEN".to_string(),
                     "ya29.secret".to_string(),
                 ),
-                ("GCP_PROJECT_ID".to_string(), "my-project".to_string()),
-                ("CLOUD_ML_REGION".to_string(), "us-central1".to_string()),
+                ("CUSTOM_PROJECT".to_string(), "my-project".to_string()),
+                ("CUSTOM_REGION".to_string(), "us-central1".to_string()),
             ]),
             HashMap::new(),
             HashMap::new(),
@@ -2158,30 +2063,30 @@ mod tests {
                 binding("oauth2.googleapis.com", 443, "/**"),
             )]),
             vec![
-                "GCE_METADATA_HOST".to_string(),
-                "GCP_PROJECT_ID".to_string(),
-                "CLOUD_ML_REGION".to_string(),
+                "CUSTOM_ENDPOINT".to_string(),
+                "CUSTOM_PROJECT".to_string(),
+                "CUSTOM_REGION".to_string(),
             ],
         )
-        .expect("classified GCP environment");
-        let env = state.child_env_with_gcp_resolved();
+        .expect("classified provider environment");
+        let env = state.child_env_with_non_secret_resolved();
 
         assert_eq!(
-            env.get("GCE_METADATA_HOST").map(String::as_str),
-            Some(google_cloud::METADATA_LOOPBACK_ADDR),
-            "GCE_METADATA_HOST should be the loopback address"
+            env.get("CUSTOM_ENDPOINT").map(String::as_str),
+            Some("marker"),
+            "non-secret values must be preserved without GCP-specific rewriting"
         );
         assert!(
             !env.contains_key("CLAUDE_CODE_USE_VERTEX"),
             "inference-specific vars should not be injected"
         );
         assert_eq!(
-            env.get("GCP_PROJECT_ID").map(String::as_str),
+            env.get("CUSTOM_PROJECT").map(String::as_str),
             Some("my-project"),
             "static config should be resolved to real value"
         );
         assert_eq!(
-            env.get("CLOUD_ML_REGION").map(String::as_str),
+            env.get("CUSTOM_REGION").map(String::as_str),
             Some("us-central1"),
         );
 
@@ -2193,7 +2098,7 @@ mod tests {
     }
 
     #[test]
-    fn child_env_with_gcp_resolved_handles_missing_config_keys() {
+    fn child_env_with_non_secret_resolved_handles_missing_config_keys() {
         let state = ProviderCredentialState::from_bound_environment(
             1,
             HashMap::from([
@@ -2209,11 +2114,11 @@ mod tests {
             vec!["GCE_METADATA_HOST".to_string()],
         )
         .expect("classified GCP environment");
-        let env = state.child_env_with_gcp_resolved();
+        let env = state.child_env_with_non_secret_resolved();
 
         assert_eq!(
             env.get("GCE_METADATA_HOST").map(String::as_str),
-            Some(google_cloud::METADATA_LOOPBACK_ADDR),
+            Some("marker"),
         );
         assert!(
             !env.contains_key("GCP_PROJECT_ID")
@@ -2226,109 +2131,7 @@ mod tests {
     }
 
     #[test]
-    fn gcp_token_response_returns_sa_over_adc() {
-        let state = ProviderCredentialState::from_environment(
-            1,
-            HashMap::from([
-                ("GCP_SA_ACCESS_TOKEN".to_string(), "sa-tok".to_string()),
-                ("GCP_ADC_ACCESS_TOKEN".to_string(), "adc-tok".to_string()),
-            ]),
-            HashMap::new(),
-            HashMap::new(),
-        );
-        let (placeholder, _) = state.gcp_token_response().expect("should find token");
-        assert_eq!(
-            placeholder, "openshell:resolve:env:v1_GCP_SA_ACCESS_TOKEN",
-            "metadata must return the current revision-scoped SA placeholder"
-        );
-    }
-
-    #[test]
-    fn gcp_token_response_falls_back_to_adc() {
-        let state = ProviderCredentialState::from_environment(
-            1,
-            HashMap::from([("GCP_ADC_ACCESS_TOKEN".to_string(), "adc-tok".to_string())]),
-            HashMap::new(),
-            HashMap::new(),
-        );
-        let (placeholder, _) = state.gcp_token_response().expect("should find ADC token");
-        assert_eq!(
-            placeholder, "openshell:resolve:env:v1_GCP_ADC_ACCESS_TOKEN",
-            "metadata must return the current revision-scoped ADC placeholder"
-        );
-    }
-
-    #[test]
-    fn gcp_token_response_returns_none_without_gcp() {
-        let state = ProviderCredentialState::from_environment(
-            1,
-            HashMap::from([("GITHUB_TOKEN".to_string(), "ghp_abc".to_string())]),
-            HashMap::new(),
-            HashMap::new(),
-        );
-        assert!(state.gcp_token_response().is_none());
-    }
-
-    #[test]
-    fn gcp_token_response_defaults_expires_in_to_3600() {
-        let state = ProviderCredentialState::from_environment(
-            1,
-            HashMap::from([("GCP_ADC_ACCESS_TOKEN".to_string(), "adc-tok".to_string())]),
-            HashMap::new(),
-            HashMap::new(),
-        );
-        let (_, expires_in) = state.gcp_token_response().unwrap();
-        assert_eq!(
-            expires_in, 3600,
-            "should default to 3600 when no expiry set"
-        );
-    }
-
-    #[test]
-    fn gcp_token_response_calculates_remaining() {
-        let now_ms = i64::try_from(
-            std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)
-                .unwrap()
-                .as_millis(),
-        )
-        .unwrap();
-        let state = ProviderCredentialState::from_environment(
-            1,
-            HashMap::from([("GCP_ADC_ACCESS_TOKEN".to_string(), "adc-tok".to_string())]),
-            HashMap::from([("GCP_ADC_ACCESS_TOKEN".to_string(), now_ms + 120_000)]),
-            HashMap::new(),
-        );
-        let (_, expires_in) = state.gcp_token_response().unwrap();
-        assert!(
-            (110..=120).contains(&expires_in),
-            "expected ~120s remaining, got {expires_in}"
-        );
-    }
-
-    #[test]
-    fn gcp_token_response_handles_already_expired_token_without_panic() {
-        let now_ms = i64::try_from(
-            std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)
-                .unwrap()
-                .as_millis(),
-        )
-        .unwrap();
-        let state = ProviderCredentialState::from_environment(
-            1,
-            HashMap::from([("GCP_ADC_ACCESS_TOKEN".to_string(), "adc-tok".to_string())]),
-            HashMap::from([("GCP_ADC_ACCESS_TOKEN".to_string(), now_ms - 1_000)]),
-            HashMap::new(),
-        );
-        assert!(
-            state.gcp_token_response().is_none(),
-            "expired token should be skipped rather than panic"
-        );
-    }
-
-    #[test]
-    fn child_env_with_gcp_resolved_resolves_vertex_vars_without_metadata_host() {
+    fn child_env_with_non_secret_resolved_resolves_vertex_vars_without_metadata_host() {
         let state = ProviderCredentialState::from_bound_environment(
             1,
             HashMap::from([
@@ -2349,7 +2152,7 @@ mod tests {
             ],
         )
         .expect("classified Vertex environment");
-        let env = state.child_env_with_gcp_resolved();
+        let env = state.child_env_with_non_secret_resolved();
         assert_eq!(
             env.get("GOOSE_PROVIDER").map(String::as_str),
             Some("gcp_vertex_ai"),
@@ -2370,7 +2173,7 @@ mod tests {
     }
 
     #[test]
-    fn child_env_with_gcp_resolved_only_unwraps_explicitly_non_secret_config() {
+    fn child_env_with_non_secret_resolved_only_unwraps_explicitly_non_secret_config() {
         let state = ProviderCredentialState::from_bound_environment(
             1,
             HashMap::from([
@@ -2416,7 +2219,7 @@ mod tests {
             )
             .expect("refreshed GCP environment");
 
-        let env = state.child_env_with_gcp_resolved();
+        let env = state.child_env_with_non_secret_resolved();
         assert_eq!(
             env.get("GCP_PROJECT_ID").map(String::as_str),
             Some("visible-project-config"),
@@ -2615,7 +2418,7 @@ mod tests {
             "opaque revisions may move numerically backwards"
         );
 
-        let (revision, env) = state.child_env_snapshot_with_gcp_resolved().unwrap();
+        let (revision, env) = state.child_env_snapshot_with_non_secret_resolved().unwrap();
         assert_eq!(revision, 2);
         assert!(env.is_empty(), "an empty snapshot must revoke the old env");
     }
@@ -2657,7 +2460,7 @@ mod tests {
                 .compare_and_install_child_env_snapshot(4, 5, HashMap::new())
                 .is_err()
         );
-        assert!(state.child_env_snapshot_with_gcp_resolved().is_err());
+        assert!(state.child_env_snapshot_with_non_secret_resolved().is_err());
     }
 
     #[test]

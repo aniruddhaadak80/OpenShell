@@ -398,7 +398,7 @@ impl ReadyBoundary for RemoteReady {
         };
         let (provider_env_revision, provider_env) = self
             .provider_credentials
-            .child_env_snapshot_with_gcp_resolved()
+            .child_env_snapshot_with_non_secret_resolved()
             .map_err(|error| {
                 BackendError::Process(format!("snapshot provider environment: {error}"))
             })?;

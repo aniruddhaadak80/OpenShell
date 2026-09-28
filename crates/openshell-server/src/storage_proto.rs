@@ -121,12 +121,15 @@ mod tests {
     // Restart policy is stored in SandboxSpec, and the count and well-known
     // timestamps are stored in SandboxStatus. Legacy payloads decode with
     // Unspecified (treated as Never), zero count, and absent timestamps.
+    // ProviderProfile is shared by the public API and StoredProviderProfile.
+    // Its additive environment message and two map-entry types belong to both
+    // closures. Existing field tags and legacy payload decoding stay intact.
     const PUBLIC_RPC_SCHEMA_SHA256: &str =
-        "b1f9b34f035234e1032685eb4fc829950acad63a971b3abd37a2ccbbec783531";
+        "cf0cbe5e27cb0fa8546668c7125b33fcff0d848e32610a770c1fc4dbf665b45a";
     const DURABLE_SCHEMA_SHA256: &str =
-        "517561b578c88d28ffd74d128faf668e65aef03c784dd794aeb5208e1dbf6de3";
+        "6b83368e27ab74911684dab33ef666e39769f24c1b5539aeef339c3a33c716c1";
     const PUBLIC_DURABLE_OVERLAP_SHA256: &str =
-        "d60c0a91163bcdd6c29e24c64e0f00555f914240465f94295d800e9063171bef";
+        "c70bea0913e4614572b1dba2a040d2161952db6daa0a91665a4fd39358242b34";
     // A persisted Sandbox without endpoint status retains its lifecycle fields;
     // the absent repeated field decodes empty and needs no database rewrite.
     const SANDBOX_WITHOUT_ENDPOINT_STATUS: &str = "0a1e0a0a73616e64626f782d6964120773616e64626f783a0764656661756c741a2b0a0773616e64626f782a0d0a05526561647912045472756530023807420d73757065727669736f722d6964";
@@ -589,9 +592,9 @@ mod tests {
                 overlap_hash.as_str(),
             ),
             (
-                (304, 26),
-                (92, 20),
-                (80, 20),
+                (307, 26),
+                (95, 20),
+                (83, 20),
                 PUBLIC_RPC_SCHEMA_SHA256,
                 DURABLE_SCHEMA_SHA256,
                 PUBLIC_DURABLE_OVERLAP_SHA256
@@ -691,6 +694,8 @@ mod tests {
         let profile = profile.profile.expect("profile");
         assert_eq!(profile.id, "profile");
         assert_eq!(profile.display_name, "Legacy");
+        assert!(profile.environment.is_none());
+        assert!(profile.required_platform_adapter.is_empty());
 
         let policy_payload =
             PolicyRevisionPayload::decode(legacy_bytes(V0_0_116_POLICY_PAYLOAD).as_slice())
