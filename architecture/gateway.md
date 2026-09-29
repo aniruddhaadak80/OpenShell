@@ -1043,6 +1043,23 @@ credentials with the profile's host, port, and path boundaries. The supervisor
 uses those bindings when it replaces credential placeholders in policy-allowed
 requests.
 
+Profiles may also declare non-secret file templates. The gateway renders only
+`config.KEY` references from the attached provider record and returns a complete
+file set in the same revisioned provider snapshot. Destinations are confined to
+`/run/openshell/providers/<provider>/<file>`. The supervisor passes that set to
+the authenticated sandbox boundary at launch and during provider reconciliation.
+The boundary holds the complete file snapshot in memory and intercepts
+read-only opens of those absolute paths. It injects a sealed memfd for each
+open. Provider reconciliation swaps the snapshot atomically, so later opens
+see new content while existing descriptors retain their version. Detach
+removes paths from the snapshot. No backing pathname is created; metadata,
+directory listing, and inotify operations do not see the virtual files. A
+supervisor without file support cannot consume a snapshot that contains files.
+The backend also probes the sandbox boundary before sending a nonempty file
+snapshot, preventing an older boundary from silently ignoring the new field.
+Credential values are never rendered into provider files because direct file
+access would bypass endpoint-bound credential resolution.
+
 Model selection, API protocol, request and response shapes, streaming behavior,
 and endpoint URL construction remain responsibilities of the workload's native
 client. The gateway does not parse or transform model API requests.

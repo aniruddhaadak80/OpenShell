@@ -3358,6 +3358,7 @@ pub(super) async fn handle_get_sandbox_provider_environment(
 ) -> Result<Response<GetSandboxProviderEnvironmentResponse>, Status> {
     let sandbox_id = request.get_ref().sandbox_id.clone();
     let supports_static_credential_bindings = request.get_ref().supports_static_credential_bindings;
+    let supports_provider_files = request.get_ref().supports_provider_files;
     crate::auth::guard::enforce_sandbox_scope(&request, &sandbox_id)?;
     drop(request);
 
@@ -3367,10 +3368,15 @@ pub(super) async fn handle_get_sandbox_provider_environment(
         .await
         .map_err(|e| Status::internal(format!("fetch sandbox failed: {e}")))?
         .ok_or_else(|| Status::not_found("sandbox not found"))?;
-    Ok(Response::new(
+    let environment =
         load_sandbox_provider_environment(state, &sandbox, supports_static_credential_bindings)
-            .await?,
-    ))
+            .await?;
+    if !supports_provider_files && !environment.files.is_empty() {
+        return Err(Status::failed_precondition(
+            "supervisor does not support provider files",
+        ));
+    }
+    Ok(Response::new(environment))
 }
 
 /// Materialize a privileged provider snapshot after the caller has authorized
@@ -3497,6 +3503,7 @@ pub(super) async fn load_sandbox_provider_environment(
         .collect();
     Ok(GetSandboxProviderEnvironmentResponse {
         environment: provider_environment.environment,
+        files: provider_environment.files,
         provider_env_revision,
         credential_expiration_times,
         dynamic_credentials: provider_environment.dynamic_credentials,
@@ -11207,6 +11214,7 @@ mod tests {
         let environment = handle_get_sandbox_provider_environment(
             &state,
             with_user(Request::new(GetSandboxProviderEnvironmentRequest {
+                supports_provider_files: false,
                 sandbox_id: "sb-snapshot-consistency".to_string(),
                 supports_static_credential_bindings: true,
             })),
@@ -11292,6 +11300,7 @@ mod tests {
                     deletion_time: None,
                 }),
                 profile: Some(openshell_core::proto::ProviderProfile {
+                    files: Vec::new(),
                     id: "generic".to_string(),
                     resource_version: 0,
                     annotations: HashMap::new(),
@@ -11385,6 +11394,7 @@ mod tests {
                     deletion_time: None,
                 }),
                 profile: Some(openshell_core::proto::ProviderProfile {
+                    files: Vec::new(),
                     id: "custom-api".to_string(),
                     resource_version: 0,
                     annotations: HashMap::new(),
@@ -11456,6 +11466,7 @@ mod tests {
                     deletion_time: None,
                 }),
                 profile: Some(openshell_core::proto::ProviderProfile {
+                    files: Vec::new(),
                     id: "custom-api".to_string(),
                     resource_version: 0,
                     annotations: HashMap::new(),
@@ -12613,6 +12624,7 @@ mod tests {
                     deletion_time: None,
                 }),
                 profile: Some(ProviderProfile {
+                    files: Vec::new(),
                     id: "custom-policy".to_string(),
                     resource_version: 0,
                     annotations: HashMap::new(),
@@ -12811,6 +12823,7 @@ mod tests {
         let legacy_env = handle_get_sandbox_provider_environment(
             &state,
             with_user(Request::new(GetSandboxProviderEnvironmentRequest {
+                supports_provider_files: false,
                 sandbox_id: "sb-provider-env".to_string(),
                 supports_static_credential_bindings: true,
             })),
@@ -12823,6 +12836,7 @@ mod tests {
         let v2_env = handle_get_sandbox_provider_environment(
             &state,
             with_user(Request::new(GetSandboxProviderEnvironmentRequest {
+                supports_provider_files: false,
                 sandbox_id: "sb-provider-env".to_string(),
                 supports_static_credential_bindings: true,
             })),
@@ -12859,6 +12873,7 @@ mod tests {
         let response = handle_get_sandbox_provider_environment(
             &state,
             with_user(Request::new(GetSandboxProviderEnvironmentRequest {
+                supports_provider_files: false,
                 sandbox_id: "sb-static-ready".to_string(),
                 supports_static_credential_bindings: true,
             })),
@@ -12917,6 +12932,7 @@ mod tests {
         let response = handle_get_sandbox_provider_environment(
             &state,
             with_user(Request::new(GetSandboxProviderEnvironmentRequest {
+                supports_provider_files: false,
                 sandbox_id: "sb-legacy-provider-env".to_string(),
                 supports_static_credential_bindings: false,
             })),
@@ -12961,6 +12977,7 @@ mod tests {
         let response = handle_get_sandbox_provider_environment(
             &state,
             with_user(Request::new(GetSandboxProviderEnvironmentRequest {
+                supports_provider_files: false,
                 sandbox_id: "sb-unbound-provider-env".to_string(),
                 supports_static_credential_bindings: true,
             })),
@@ -13071,6 +13088,7 @@ mod tests {
         let environment = handle_get_sandbox_provider_environment(
             &state,
             with_user(Request::new(GetSandboxProviderEnvironmentRequest {
+                supports_provider_files: false,
                 sandbox_id: "sb-policy-binding".to_string(),
                 supports_static_credential_bindings: true,
             })),
@@ -13136,6 +13154,7 @@ mod tests {
         let next_environment = handle_get_sandbox_provider_environment(
             &state,
             with_user(Request::new(GetSandboxProviderEnvironmentRequest {
+                supports_provider_files: false,
                 sandbox_id: "sb-policy-binding".to_string(),
                 supports_static_credential_bindings: true,
             })),
@@ -13196,6 +13215,7 @@ mod tests {
         let unbound_environment = handle_get_sandbox_provider_environment(
             &state,
             with_user(Request::new(GetSandboxProviderEnvironmentRequest {
+                supports_provider_files: false,
                 sandbox_id: "sb-policy-binding".to_string(),
                 supports_static_credential_bindings: true,
             })),
@@ -13292,6 +13312,7 @@ mod tests {
         let response = handle_get_sandbox_provider_environment(
             &state,
             with_user(Request::new(GetSandboxProviderEnvironmentRequest {
+                supports_provider_files: false,
                 sandbox_id: "sb-mixed-provider-env".to_string(),
                 supports_static_credential_bindings: true,
             })),
@@ -13400,6 +13421,7 @@ mod tests {
         let response = handle_get_sandbox_provider_environment(
             &state,
             with_user(Request::new(GetSandboxProviderEnvironmentRequest {
+                supports_provider_files: false,
                 sandbox_id: "sb-token-exchange-subject".to_string(),
                 supports_static_credential_bindings: true,
             })),
@@ -13467,6 +13489,7 @@ mod tests {
         let first = handle_get_sandbox_provider_environment(
             &state,
             with_user(Request::new(GetSandboxProviderEnvironmentRequest {
+                supports_provider_files: false,
                 sandbox_id: "sb-provider-revision".to_string(),
                 supports_static_credential_bindings: true,
             })),
@@ -13506,6 +13529,7 @@ mod tests {
         let second = handle_get_sandbox_provider_environment(
             &state,
             with_user(Request::new(GetSandboxProviderEnvironmentRequest {
+                supports_provider_files: false,
                 sandbox_id: "sb-provider-revision".to_string(),
                 supports_static_credential_bindings: true,
             })),
@@ -13733,6 +13757,7 @@ mod tests {
                     deletion_time: None,
                 }),
                 profile: Some(ProviderProfile {
+                    files: Vec::new(),
                     id: "custom-token".to_string(),
                     resource_version: 0,
                     annotations: HashMap::new(),
@@ -13954,6 +13979,7 @@ mod tests {
         let baseline_env = handle_get_sandbox_provider_environment(
             &state,
             with_user(Request::new(GetSandboxProviderEnvironmentRequest {
+                supports_provider_files: false,
                 sandbox_id: "sb-attach-lifecycle".to_string(),
                 supports_static_credential_bindings: true,
             })),
@@ -13987,6 +14013,7 @@ mod tests {
         let attached_env = handle_get_sandbox_provider_environment(
             &state,
             with_user(Request::new(GetSandboxProviderEnvironmentRequest {
+                supports_provider_files: false,
                 sandbox_id: "sb-attach-lifecycle".to_string(),
                 supports_static_credential_bindings: true,
             })),
@@ -14028,6 +14055,7 @@ mod tests {
         let detached_env = handle_get_sandbox_provider_environment(
             &state,
             with_user(Request::new(GetSandboxProviderEnvironmentRequest {
+                supports_provider_files: false,
                 sandbox_id: "sb-attach-lifecycle".to_string(),
                 supports_static_credential_bindings: true,
             })),
@@ -14063,6 +14091,7 @@ mod tests {
                 profiles: vec![ProviderProfileImportItem {
                     source: "custom-api.yaml".to_string(),
                     profile: Some(ProviderProfile {
+                        files: Vec::new(),
                         id: "custom-api".to_string(),
                         resource_version: 0,
                         annotations: HashMap::new(),
@@ -14131,6 +14160,7 @@ mod tests {
         let baseline_env = handle_get_sandbox_provider_environment(
             &state,
             with_user(Request::new(GetSandboxProviderEnvironmentRequest {
+                supports_provider_files: false,
                 sandbox_id: "sb-attach-lifecycle".to_string(),
                 supports_static_credential_bindings: true,
             })),
@@ -14167,6 +14197,7 @@ mod tests {
         let attached_env = handle_get_sandbox_provider_environment(
             &state,
             with_user(Request::new(GetSandboxProviderEnvironmentRequest {
+                supports_provider_files: false,
                 sandbox_id: "sb-attach-lifecycle".to_string(),
                 supports_static_credential_bindings: true,
             })),
@@ -14207,6 +14238,7 @@ mod tests {
         let detached_env = handle_get_sandbox_provider_environment(
             &state,
             with_user(Request::new(GetSandboxProviderEnvironmentRequest {
+                supports_provider_files: false,
                 sandbox_id: "sb-attach-lifecycle".to_string(),
                 supports_static_credential_bindings: true,
             })),
@@ -17736,6 +17768,7 @@ mod tests {
                     deletion_time: None,
                 }),
                 profile: Some(ProviderProfile {
+                    files: Vec::new(),
                     id: "custom-api".to_string(),
                     resource_version: 0,
                     annotations: HashMap::new(),
