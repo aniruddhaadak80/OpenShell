@@ -16,6 +16,7 @@
     {"name": "needs:spike", "color": "fbca04", "description": "Needs a maintainer-approved bounded investigation"},
     {"name": "needs:rfc", "color": "fbca04", "description": "Needs a maintainer-directed RFC pull request"},
     {"name": "ready-for:agent", "color": "bfdadc", "description": "An agent may perform the authorized next phase"},
-    {"name": "ready-for:human", "color": "e4c7ec", "description": "A human must guide or decide the next phase"}
+    {"name": "ready-for:human", "color": "e4c7ec", "description": "A human must guide or decide the next phase"},
+    {"name": "status:stale", "color": "ededed", "description": "Inactive item awaiting renewed attention; separate from workflow state"}
   ]
 }

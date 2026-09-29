@@ -23,6 +23,7 @@ class WorkflowLabelsTest(unittest.TestCase):
         labels = workflow_labels.load_manifest(manifest)
         self.assertIn("state:new", {label["name"] for label in labels})
         self.assertIn("ready-for:agent", {label["name"] for label in labels})
+        self.assertIn("status:stale", {label["name"] for label in labels})
 
     def test_manifest_rejects_duplicate_names(self):
         self.assertIsNotNone(workflow_labels, "workflow_labels.py is missing")
