@@ -47,6 +47,12 @@ pub fn severity_char(severity_id: u8) -> char {
 /// NET:OPEN [MED] DENIED python3(42) -> blocked.com:443
 /// FINDING:BLOCKED [HIGH] "NSSH1 Nonce Replay Attack"
 /// ```
+///
+/// `Unknown` (0) and `Other` (99) render as `[UNKN]` rather than `[INFO]`.
+/// They are distinct OCSF severities, so folding them into `[INFO]` would make
+/// an event of unclassified severity indistinguishable in the log from a
+/// deliberately informational one. `severity_char` already maps both to a space
+/// for the same reason; this keeps the two helpers consistent.
 #[must_use]
 pub fn severity_tag(severity_id: u8) -> &'static str {
     match severity_id {
@@ -55,6 +61,7 @@ pub fn severity_tag(severity_id: u8) -> &'static str {
         4 => "[HIGH]",
         5 => "[CRIT]",
         6 => "[FATAL]",
+        0 | 99 => "[UNKN]",
         _ => "[INFO]",
     }
 }
@@ -600,6 +607,30 @@ mod tests {
         assert_eq!(severity_char(4), 'H');
         assert_eq!(severity_char(5), 'C');
         assert_eq!(severity_char(6), 'F');
+    }
+
+    #[test]
+    fn test_severity_tag_mapping() {
+        assert_eq!(severity_tag(1), "[INFO]");
+        assert_eq!(severity_tag(2), "[LOW]");
+        assert_eq!(severity_tag(3), "[MED]");
+        assert_eq!(severity_tag(4), "[HIGH]");
+        assert_eq!(severity_tag(5), "[CRIT]");
+        assert_eq!(severity_tag(6), "[FATAL]");
+    }
+
+    // Unknown (0) and Other (99) are real OCSF severities, not synonyms for
+    // Informational. Rendering them as [INFO] hid unclassified events in the
+    // audit log behind the most common severity.
+    #[test]
+    fn test_severity_tag_distinguishes_unknown_from_informational() {
+        assert_eq!(severity_tag(0), "[UNKN]");
+        assert_eq!(severity_tag(99), "[UNKN]");
+        assert_ne!(severity_tag(0), severity_tag(1));
+        assert_ne!(severity_tag(99), severity_tag(1));
+        // Consistent with severity_char, which maps both to a space.
+        assert_eq!(severity_char(0), ' ');
+        assert_eq!(severity_char(99), ' ');
     }
 
     #[test]
