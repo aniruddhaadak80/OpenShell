@@ -115,8 +115,8 @@ skips only Linux-specific installer, build-environment shell-helper, and
 packaging-asset tests; its
 cross-platform Python, Markdown, license, and documentation checks still run.
 Tracked Cargo lockfiles are checked natively through PowerShell. Deterministic
-gateway parity uses Git for Windows Bash with temporary, checkout-scoped Python
-launchers. The TypeScript SDK uses Windows protobuf plugin paths and x64 Biome
+gateway configuration checks remain in the ordinary Rust and E2E suites. The
+TypeScript SDK uses Windows protobuf plugin paths and x64 Biome
 under emulation on ARM64, while its test binding follows Node's architecture
 and the locked Rolldown version. Go tests retain race coverage wherever the
 toolchain supports it; POSIX permission-bit checks are not Windows ACL tests.
