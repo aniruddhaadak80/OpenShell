@@ -285,6 +285,8 @@ installers define how OpenShell is installed. This keeps the runtime mode
 independent from binary or package installation and lets multiple installers
 reuse the same prepared setup disk. The `none` installer skips OpenShell
 installation and boots the prepared environment directly.
+The `ubuntu-k3s` environment prepares K3s and Helm, and the `k3s` installer
+loads locally built images before deploying OpenShell with the Helm chart.
 
 ### Interactive tmachine shell
 
