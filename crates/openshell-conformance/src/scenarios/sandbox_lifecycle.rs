@@ -27,11 +27,33 @@ pub const SANDBOX_LIFECYCLE_SCENARIO: Scenario = Scenario {
     run: run_sandbox_lifecycle,
 };
 
+/// Certify stop and stopped-deletion behavior without requiring exec.
+pub const SANDBOX_LIFECYCLE_CONTROL_PLANE_SCENARIO: Scenario = Scenario {
+    name: "sandbox/lifecycle/control-plane",
+    description: "Verify sandbox stop and stopped-deletion behavior.",
+    run: run_lifecycle_control_plane,
+};
+
+/// Certify restart and workspace persistence through exec observations.
+pub const SANDBOX_LIFECYCLE_RESTART_PERSISTENCE_SCENARIO: Scenario = Scenario {
+    name: "sandbox/lifecycle/restart-persistence",
+    description: "Verify sandbox restart and workspace persistence.",
+    run: run_lifecycle_restart_persistence,
+};
+
 fn run_sandbox_lifecycle(runner: &mut OpenShellRunner) -> ScenarioFuture<'_> {
     Box::pin(async move {
         stop_start_preserves_workspace(runner).await?;
         stopped_can_be_deleted(runner).await
     })
+}
+
+fn run_lifecycle_control_plane(runner: &mut OpenShellRunner) -> ScenarioFuture<'_> {
+    Box::pin(stopped_can_be_deleted(runner))
+}
+
+fn run_lifecycle_restart_persistence(runner: &mut OpenShellRunner) -> ScenarioFuture<'_> {
+    Box::pin(stop_start_preserves_workspace(runner))
 }
 
 async fn stop_start_preserves_workspace(runner: &mut OpenShellRunner) -> Result<(), String> {
