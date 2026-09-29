@@ -329,8 +329,9 @@ Docker and Fedora Podman environments import both local runtime images and
 configure the gateway to use them. The Ubuntu `deb` installer consumes
 `artifacts/packages/openshell.deb`; the `binaries` installer remains available
 for direct executable installation on every environment. Release Dev and
-Release Tag run Ubuntu conformance through the Debian package, while Fedora
-continues using direct executable installation until RPM coverage is available.
+Release Tag run Ubuntu Docker conformance through the Debian package and Ubuntu
+K3s conformance through the Helm chart, while Fedora continues using direct
+executable installation until RPM coverage is available.
 The release canary separately exercises the public installer on Ubuntu. The
 installer selects the OpenShell Snap only with `OPENSHELL_INSTALL_METHOD=snap`
 or when the Snap is already installed; otherwise it uses the native Debian or
