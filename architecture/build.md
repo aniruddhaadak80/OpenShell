@@ -272,7 +272,9 @@ CLI conformance runs after target provisioning and operates only through the
 configured OpenShell CLI. The smoke scenario verifies the black-box sandbox
 lifecycle by creating, inspecting, executing in, and deleting a sandbox. The
 file-transfer scenario verifies portable upload and download behavior, Git-aware
-filtering, and sandbox workspace path safety.
+filtering, and sandbox workspace path safety. Source E2E lanes compile and run
+the Cargo tests in `tests/suites/conformance`; installed-artifact lanes run the
+same test package from a precompiled nextest archive.
 Feature suites use the same disposable guest but may provision isolated
 dependencies after installation. The Keycloak provider-refresh suite starts a
 guest-local Keycloak realm and verifies a successful OAuth refresh followed by
@@ -316,13 +318,14 @@ Galaxy release pins in `requirements.yaml` are treated as immutable, including
 any transitive dependency pins. Cache misses with Galaxy enabled reinstall
 the required roles and their dependencies before running playbooks.
 
-The `tests/artifacts.nix` helpers build the CLI, conformance CLI, and sandbox
-with musl, and the gateway and supervisor with GNU. Image assembly stages
-the gateway, sandbox, and supervisor as separate binaries for their respective
-Dockerfiles. The helpers stage binaries under `artifacts/binaries` so local and
-CI builds expose the same inputs to tmachine and image assembly. The Ubuntu
-Docker and Fedora Podman environments import both local runtime images and
-configure the gateway to use them. The Ubuntu `deb` installer consumes
+The `tests/artifacts.nix` helpers build the CLI and sandbox with musl, the
+gateway and supervisor with GNU, and the conformance suites as nextest archives.
+Image assembly stages the gateway, sandbox, and supervisor as separate binaries
+for their respective Dockerfiles. The helpers stage binaries under
+`artifacts/binaries` so local and CI builds expose the same inputs to tmachine
+and image assembly. The Ubuntu Docker and Fedora Podman environments import both
+local runtime images and configure the gateway to use them. The Ubuntu `deb`
+installer consumes
 `artifacts/packages/openshell.deb`; the `binaries` installer remains available
 for direct executable installation on every environment. Release Dev and
 Release Tag run Ubuntu conformance through the Debian package, while Fedora
